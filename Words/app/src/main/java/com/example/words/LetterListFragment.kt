@@ -1,22 +1,57 @@
+/*
+ * Copyright (C) 2020 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.example.words
 
 import android.os.Bundle
 import android.view.*
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.asLiveData
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.words.data.SettingsDataStore
+import com.example.words.data.dataStore
 import com.example.words.databinding.FragmentLetterListBinding
+import kotlinx.coroutines.launch
 
+/**
+ * Entry fragment for the app. Displays a [RecyclerView] of letters.
+ */
+
+private const val GRIDVIEW_SPAN_COUNT = 4
+
+@Suppress("OVERRIDE_DEPRECATION")
 class LetterListFragment : Fragment() {
     private var _binding: FragmentLetterListBinding? = null
+
+    // This property is only valid between onCreateView and onDestroyView.
     private val binding get() = _binding!!
+
     private lateinit var recyclerView: RecyclerView
+
+    // Keeps track of which LayoutManager is in use for the [RecyclerView]
     private var isLinearLayoutManager = true
+
+    private lateinit var layoutDataStore: SettingsDataStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        @Suppress("DEPRECATION")
         setHasOptionsMenu(true)
     }
 
@@ -25,39 +60,49 @@ class LetterListFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
+        // Retrieve and inflate the layout for this fragment
         _binding = FragmentLetterListBinding.inflate(inflater, container, false)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         recyclerView = binding.recyclerView
-        // Sets the LinearLayoutManager of the recyclerview
-        chooseLayout()
+        // Initialize layoutDataStore
+        layoutDataStore = SettingsDataStore(requireContext().dataStore)
+
+        layoutDataStore.preferenceFlow.asLiveData().observe(viewLifecycleOwner) { value ->
+            isLinearLayoutManager = value
+            chooseLayout()
+            // Redraw the menu
+            activity?.invalidateOptionsMenu()
+        }
     }
 
+    /**
+     * Frees the binding object when the Fragment is destroyed.
+     */
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
     }
 
-    /**
-     * Initializes the [Menu] to be used with the current [Fragment]
-     */
     override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
         inflater.inflate(R.menu.layout_menu, menu)
-
         val layoutButton = menu.findItem(R.id.action_switch_layout)
         setIcon(layoutButton)
     }
 
     /**
      * Sets the LayoutManager for the [RecyclerView] based on the desired orientation of the list.
+     *
+     * Notice that because the enclosing class has changed from an Activity to a Fragment,
+     * the signature of the LayoutManagers has to slightly change.
      */
     private fun chooseLayout() {
         if (isLinearLayoutManager) {
-            recyclerView.layoutManager = LinearLayoutManager(this.requireContext())
+            recyclerView.layoutManager = LinearLayoutManager(context)
         } else {
-            recyclerView.layoutManager = GridLayoutManager(this.requireContext(), 4)
+            recyclerView.layoutManager = GridLayoutManager(context, GRIDVIEW_SPAN_COUNT)
         }
         recyclerView.adapter = LetterAdapter()
     }
@@ -66,7 +111,6 @@ class LetterListFragment : Fragment() {
         if (menuItem == null)
             return
 
-        // Set the drawable for the menu icon based on which LayoutManager is currently in use
         menuItem.icon =
             if (isLinearLayoutManager)
                 ContextCompat.getDrawable(this.requireContext(), R.drawable.ic_grid_layout)
@@ -77,21 +121,28 @@ class LetterListFragment : Fragment() {
      * Determines how to handle interactions with the selected [MenuItem]
      */
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        @Suppress("DEPRECATION")
         return when (item.itemId) {
             R.id.action_switch_layout -> {
                 // Sets isLinearLayoutManager (a Boolean) to the opposite value
                 isLinearLayoutManager = !isLinearLayoutManager
+
+                // Launch a coroutine and write the layout setting in the preference Datastore
+                lifecycleScope.launch {
+                    layoutDataStore.saveLayoutToPreferencesStore(isLinearLayoutManager, requireContext())
+                }
+
                 // Sets layout and icon
                 chooseLayout()
                 setIcon(item)
 
                 return true
             }
-            //  Otherwise, do nothing and use the core event handling
+            // Otherwise, do nothing and use the core event handling
 
             // when clauses require that all possible paths be accounted for explicitly,
-            //  for instance both the true and false cases if the value is a Boolean,
-            //  or an else to catch all unhandled cases.
+            // for instance both the true and false cases if the value is a Boolean,
+            // or an else to catch all unhandled cases.
             else -> super.onOptionsItemSelected(item)
         }
     }
